@@ -7,3 +7,6 @@ array data is designed to test for differential expression of genes measured via
 differently expressed in the study populations with and without osteoperosis. Tidyverse is also needed for some computations later on in the code.
 With these packages installed the code will run on it own and perform leave one out cross validation on the gene expression data to test to see what the 
 potential accuracy of a linear discriminant analysis model would be. The end result is an estimated accuracy of such a model tested 10 times in the LOOCV.
+
+The raw gene expression data obtained from GEO is also attached as OP_data and was used in the code to extract said raw data in an easier way than through 
+the GEOquery package
