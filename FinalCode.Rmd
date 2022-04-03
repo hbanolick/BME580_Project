@@ -1,0 +1,184 @@
+---
+title: "Final_Project"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(limma)
+library(GEOquery)
+library(tidyverse) 
+library(dplyr)
+```
+
+The problem now is how do i make the raw data match to the data used for leave on out
+I can just index based on the gsms using an if tree in the overall for loop. yay
+
+
+````{r}
+possiblecombos=c("X000011111","0X00011111","00X0011111","000X011111","0000X11111",
+                 "00000X1111","000001X111","0000011X11","00000111X1","000001111X") #This tells the code which person to leave out for each step of the LOOCV
+#k=6
+accuracylda=data.frame(matrix(nrow = 10,ncol = 1)) 
+names(accuracylda)=c("accuracy")  # Initialize an accuracy array that we can add to for each step of the code to keep track of how each iteration in the LOOCV does 
+
+for( k in 1:length(possiblecombos)){  
+rawdata=read.delim("OP_data.txt") #loads in raw expresssion level data to be used later
+
+# load series and platform data from GEO: gets the data directly from the GEO series as well as the platform data which tells us what gene each ID_REF references 
+gset <- getGEO("GSE35956", GSEMatrix =TRUE, AnnotGPL=TRUE)
+if (length(gset) > 1) idx <- grep("GPL570", attr(gset, "names")) else idx <- 1
+gset <- gset[[idx]]
+
+# make proper column names to match toptable 
+fvarLabels(gset) <- make.names(fvarLabels(gset))
+
+# group membership for all samples
+gsms <- possiblecombos[k]
+sml <- strsplit(gsms, split="")[[1]]
+
+# filter out excluded samples so that we are running LOOCV for this model
+sel <- which(sml != "X")
+sml <- sml[sel]
+gset <- gset[ ,sel]
+
+# log2 transformation: The limma package requires that the raw data be log transformed this way
+ex <- exprs(gset)
+qx <- as.numeric(quantile(ex, c(0., 0.25, 0.5, 0.75, 0.99, 1.0), na.rm=T))
+LogC <- (qx[5] > 100) ||
+          (qx[6]-qx[1] > 50 && qx[2] > 0)
+if (LogC) { ex[which(ex <= 0)] <- NaN
+  exprs(gset) <- log2(ex) }
+
+# assign samples to groups and set up design matrix
+gs <- factor(sml)
+groups <- make.names(c("Contorl","study"))
+levels(gs) <- groups
+gset$group <- gs
+design <- model.matrix(~group + 0, gset)
+colnames(design) <- levels(gs)
+
+fit <- lmFit(gset, design)  # fit linear model as a part of the limma package that is built to analyze differently expressed genes in microaray data sets
+
+# set up contrasts of interest and recalculate model coefficients
+cts <- paste(groups[1], groups[2], sep="-")
+cont.matrix <- makeContrasts(contrasts=cts, levels=design)
+fit2 <- contrasts.fit(fit, cont.matrix)
+
+# compute statistics and table of top significant genes
+fit2 <- eBayes(fit2, 0.01)
+tT <- topTable(fit2, adjust="fdr", sort.by="B", number=250)
+
+# this sets up the table that lists the genes that are the most signigicantly different between test groups
+tT <- subset(tT, select=c("ID","adj.P.Val","P.Value","t","B","logFC","Gene.symbol","Gene.title"))
+
+
+
+
+
+predictnumber=6   #number of genes that we are using in the model, they will be the most significantly different genes
+siggenes=tT$ID[1:predictnumber] #gets the ID_REF for the genes we are using in the model
+regressiondata=data.frame(matrix(ncol=6,nrow=11)) # creates the empty data frame where we will put the regression data
+
+
+# This for loops uses the ID's of the genes to go through the raw data and extract the expression levels of those genes. While doing this it also alteres the structure to put it in the form we need to run the LDA later
+for(i in 1:length(siggenes)){ 
+  geneexpressionindex=match(siggenes[i],rawdata$ID_REF)
+  genedata=rawdata[geneexpressionindex,1:11]
+  genedata=t(genedata)
+  regressiondata[,i]=genedata
+}
+rownames(regressiondata) <- rownames(genedata) # these lines just makes the labels make sense 
+names(regressiondata) = regressiondata[1,]
+regressiondata = regressiondata[-1,]
+
+
+
+
+
+
+
+outcome=data.frame(matrix(ncol=1,nrow=10)) #Initialize outcomes data frame
+colnames(outcome)=c("outcome")
+
+# In this loop we add whether or not the patients had OP based on their ID's and their diagnoses
+for(i in 1:length(outcome$outcome)){
+  if(rownames(regressiondata)[i] == "GSM878095"){
+    outcome$outcome[i]=0
+  } else if (rownames(regressiondata)[i] == "GSM878096"){
+    outcome$outcome[i]=0
+  } else if (rownames(regressiondata)[i] == "GSM878097"){
+    outcome$outcome[i]=0
+  } else if (rownames(regressiondata)[i] == "GSM878098"){
+    outcome$outcome[i]=0
+  } else if (rownames(regressiondata)[i] == "GSM878099"){
+    outcome$outcome[i]=0
+  } else if (rownames(regressiondata)[i] == "GSM878104"){
+    outcome$outcome[i]=1
+  } else if (rownames(regressiondata)[i] == "GSM878105"){
+    outcome$outcome[i]=1
+  } else if (rownames(regressiondata)[i] == "GSM878106"){
+    outcome$outcome[i]=1
+  } else if (rownames(regressiondata)[i] == "GSM878107"){
+    outcome$outcome[i]=1
+  } else if (rownames(regressiondata)[i] == "GSM878108"){
+    outcome$outcome[i]=1
+  }
+}
+
+regressiondata["outcome"]=outcome #merges data frames
+
+
+
+
+
+
+
+
+for (i in 1:(ncol(regressiondata)-1)){     #for loops goes through and changes the class of the data to numeric so it can be scaled
+  regressiondata[i]=as.numeric(unlist(regressiondata[i]))
+}
+scaleddata=apply(regressiondata[1:6],2,scale)  #Scale all gene expression data, not the outcome though
+regressiondata[1:6]=scaleddata
+
+testdata=regressiondata[k,]  #Split the data into training and test, Training data will be used to create model
+regressiondata = regressiondata[-c(k),] #The test data corresponds to the patient that was left out of the initial gene expression comparison 
+
+
+
+
+#logmodel=glm(outcome~., family = binomial, data = regressiondata)
+#summary(logmodel)
+
+ldamodel=lda(outcome ~., data=regressiondata) #runs LDA model on the training data
+ldamodel
+
+
+
+ldapred=predict(ldamodel,testdata)$class    #uses the LDA model to predict the OP status of the left out patient
+ldatable=table(Predicted = ldapred, Actual = testdata$outcome)
+
+#logpredict = predict(logmodel, newdata=testdata,type="response")
+
+
+# this if tree calculates the accuracy of the LDA model for each iteration and then adds it to the accuracy data frame from the beginning
+if (k<=5 && ldatable[1,1] == 1){     
+  accuracylda[k,1]=1
+} else if (k<=5 && ldatable[1,1] == 0){
+  accuracylda[k,1]=0
+} else if (k>5 && ldatable[2,1] == 1){
+  accuracylda[k,1]=1
+} else if (k>5 && ldatable[2,1] == 0){
+  accuracylda[k,1]=0
+}
+
+
+
+
+}
+
+# Takes the average accuracy value which gives us an indication of how well this type of model will work in this situation
+averageaccuracy=mean(accuracylda$accuracy) 
+````
+
+
