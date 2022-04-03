@@ -11,8 +11,7 @@ library(tidyverse)
 library(dplyr)
 ```
 
-The problem now is how do i make the raw data match to the data used for leave on out
-I can just index based on the gsms using an if tree in the overall for loop. yay
+
 
 
 ````{r}
